@@ -1,6 +1,7 @@
 
 
-#Example of how to serve a page
+# Example of how to serve a page
+
 ```
 fn handleIndex(ctx: ThreadPool.RequestContext) !void {
     const html =
