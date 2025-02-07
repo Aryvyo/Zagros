@@ -15,15 +15,13 @@ pub const FileEvent = struct {
 pub const StaticFile = struct {
     modified: i128,
     route: []const u8,
-    content: []const u8,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator, route: []const u8, content: []const u8, modified: i128) !*StaticFile {
+    pub fn init(allocator: std.mem.Allocator, route: []const u8, modified: i128) !*StaticFile {
         const self = try allocator.create(StaticFile);
         self.* = .{
             .modified = modified,
             .route = try allocator.dupe(u8, route),
-            .content = try allocator.dupe(u8, content),
             .allocator = allocator,
         };
         return self;
@@ -31,7 +29,6 @@ pub const StaticFile = struct {
 
     pub fn deinit(self: *StaticFile) void {
         self.allocator.free(self.route);
-        self.allocator.free(self.content);
         self.allocator.destroy(self);
     }
 };
