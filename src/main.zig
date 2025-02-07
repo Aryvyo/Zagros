@@ -21,6 +21,22 @@ const http_response =
     \\
 ;
 
+fn handleFileChange(event: static.FileEvent, pool: *ThreadPool.ThreadPool) !void {
+    switch (event.change) {
+        .added => {
+            std.debug.print("Adding route for new file: {s}\n", .{event.path});
+            try pool.addRoute(event.path, static.serveStatic);
+        },
+        .modified => {
+            std.debug.print("File modified: {s}\n", .{event.path});
+        },
+        .deleted => {
+            std.debug.print("File deleted: {s}\n", .{event.path});
+            // TODO: try pool.removeRoute(event.path);
+        },
+    }
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa.deinit() == .ok);
@@ -36,25 +52,24 @@ pub fn main() !void {
 
     std.debug.print("Server listening on 127.0.0.1:8080\n", .{});
 
-    const cwd = std.fs.cwd();
-    cwd.makeDir("static") catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => {
-            std.debug.print("Error creating static directory", .{});
-            return err;
-        },
+    var staticServer = static.StaticFileServer.init(allocator, handleFileChange, &pool);
+    defer staticServer.deinit();
+
+    try staticServer.checkForChanges();
+
+    const WatcherContext = struct {
+        fn watch(sServer: *static.StaticFileServer) !void {
+            while (true) {
+                sServer.checkForChanges() catch |err| {
+                    std.debug.print("Error occurred watching for changes: {any}\n", .{err});
+                };
+                std.time.sleep(1 * std.time.ns_per_s);
+            }
+        }
     };
 
-    var staticDir = try cwd.openDir("static", .{ .iterate = true });
-    defer staticDir.close();
-
-    var iterDir = staticDir.iterate();
-    while (try iterDir.next()) |entry| {
-        if (entry.kind == .file) {
-            std.debug.print("Detected {s} in static/, adding as route...\n", .{entry.name});
-            try pool.addRoute(entry.name, static.serveStatic);
-        }
-    }
+    const watcher = try std.Thread.spawn(.{}, WatcherContext.watch, .{&staticServer});
+    defer watcher.join();
 
     while (true) {
         const client = try server.accept();
