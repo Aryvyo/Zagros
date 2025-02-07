@@ -7,6 +7,7 @@ pub const RequestContext = struct {
     client_writer: std.net.Stream.Writer,
     client_reader: std.net.Stream.Reader,
     headers: std.StringHashMap([]const u8),
+    route: []const u8,
 };
 
 pub const RouterFn = *const fn (RequestContext) anyerror!void;
@@ -163,9 +164,10 @@ pub const ThreadPool = struct {
                 .client_writer = client_writer,
                 .client_reader = client_reader,
                 .headers = headers,
+                .route = path.items[0],
             };
 
-            if (self.router.routes.get(path.items[0])) |handler| {
+            if (self.router.routes.get(ctx.route)) |handler| {
                 handler(ctx) catch |err| {
                     const error_response = switch (err) {
                         //add whatever errors you need here ig

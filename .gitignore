@@ -16,6 +16,7 @@ zig-out/
 /build/
 /build-*/
 /docgen_tmp/
+static/
 responses.txt
 board.db
 .glimpse

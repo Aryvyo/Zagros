@@ -19,6 +19,7 @@ pub fn parseCookies(allocator: std.mem.Allocator, cookie_header: []const u8) std
 
 pub fn getPath(first_line: []const u8, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
     // Split "GET /path HTTP/1.1" into parts
+    std.debug.print("{s}", .{first_line});
     var iter = std.mem.splitAny(u8, first_line, " ");
     _ = iter.next() orelse return error.InvalidRequest; // Skip HTTP method
     const path = iter.next() orelse return error.InvalidRequest;
