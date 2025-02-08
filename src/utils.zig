@@ -41,22 +41,6 @@ pub fn getPath(path_raw: []const u8, allocator: std.mem.Allocator) !std.ArrayLis
     return paths;
 }
 
-pub fn generatePostDivs(allocator: std.mem.Allocator, posts: []const []const u8) ![]u8 {
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
-
-    for (posts) |post| {
-        const safe_post = try escapeHtml(allocator, post);
-        defer allocator.free(safe_post);
-
-        try buffer.appendSlice("<div class='post'>");
-        try buffer.appendSlice(safe_post);
-        try buffer.appendSlice("</div>");
-    }
-
-    return try buffer.toOwnedSlice();
-}
-
 pub fn urlDecode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var result = std.ArrayList(u8).init(allocator);
     var i: usize = 0;
