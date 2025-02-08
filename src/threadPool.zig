@@ -3,34 +3,75 @@ const net = std.net;
 const utils = @import("utils.zig");
 const cache = @import("cache.zig");
 
+pub const HttpMethod = enum {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+    PATCH,
+    OPTIONS,
+    HEAD,
+
+    pub fn fromString(method: []const u8) ?HttpMethod {
+        if (std.mem.eql(u8, method, "GET")) return .GET;
+        if (std.mem.eql(u8, method, "POST")) return .POST;
+        if (std.mem.eql(u8, method, "PUT")) return .PUT;
+        if (std.mem.eql(u8, method, "DELETE")) return .DELETE;
+        if (std.mem.eql(u8, method, "PATCH")) return .PATCH;
+        if (std.mem.eql(u8, method, "OPTIONS")) return .OPTIONS;
+        if (std.mem.eql(u8, method, "HEAD")) return .HEAD;
+        return null;
+    }
+};
+
 pub const RequestContext = struct {
     allocator: std.mem.Allocator,
     client_writer: std.net.Stream.Writer,
     client_reader: std.net.Stream.Reader,
     headers: std.StringHashMap([]const u8),
     route: []const u8,
+    method: HttpMethod,
     fileCache: *cache.Cache,
+    body: ?[]const u8 = null,
 };
 
 pub const RouterFn = *const fn (RequestContext) anyerror!void;
 
+pub const RouteHandler = struct {
+    path: []const u8,
+    method: HttpMethod,
+    handler: RouterFn,
+};
+
 pub const Router = struct {
-    routes: std.StringHashMap(RouterFn),
+    routes: std.ArrayList(RouteHandler),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) Router {
         return .{
-            .routes = std.StringHashMap(RouterFn).init(allocator),
+            .routes = std.ArrayList(RouteHandler).init(allocator),
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Router) void {
+        for (self.routes.items) |route| {
+            self.allocator.free(route.path);
+        }
         self.routes.deinit();
     }
 
-    pub fn addRoute(self: *Router, path: []const u8, handler: RouterFn) !void {
-        try self.routes.put(path, handler);
+    pub fn addRoute(self: *Router, path: []const u8, method: HttpMethod, handler: RouterFn) !void {
+        try self.routes.append(.{ .path = try self.allocator.dupe(u8, path), .method = method, .handler = handler });
+    }
+
+    pub fn findHandler(self: *Router, path: []const u8, method: HttpMethod) ?RouterFn {
+        for (self.routes.items) |route| {
+            if (std.mem.eql(u8, route.path, path) and route.method == method) {
+                return route.handler;
+            }
+        }
+        return null;
     }
 };
 
@@ -140,27 +181,37 @@ pub const ThreadPool = struct {
             const client_reader = job_ptr.client.stream.reader();
             const client_writer = job_ptr.client.stream.writer();
 
-            const path = if (try client_reader.readUntilDelimiterOrEofAlloc(jobAllocator, '\n', 65536)) |first_line|
-                try utils.getPath(first_line, jobAllocator)
-            else {
-                return error.InvalidRequest;
-            };
+            const first_line = (try client_reader.readUntilDelimiterOrEofAlloc(jobAllocator, '\n', 65536)) orelse return error.InvalidRequest;
+            var firstLineIter = std.mem.split(u8, first_line, " ");
+            const methodStr = firstLineIter.next() orelse return error.InvalidRequest;
+            const pathRaw = firstLineIter.next() orelse return error.InvalidRequest;
+
+            const method = HttpMethod.fromString(methodStr) orelse return error.UnsupportedMethod;
+            const path = try utils.getPath(pathRaw, jobAllocator);
 
             std.debug.print("Requested path: /{s}, extras: {any}\n", .{ path.items[0], path.items[1..] });
 
+            var contentLength: usize = 0;
             while (true) {
                 const line = try client_reader.readUntilDelimiterOrEofAlloc(jobAllocator, '\n', 65536) orelse break;
-
                 if (line.len <= 2) break;
+                if (std.mem.indexOf(u8, line, ":")) |colonIndex| {
+                    const key = std.mem.trim(u8, line[0..colonIndex], " \r");
+                    const value = std.mem.trim(u8, line[colonIndex + 1 ..], " \r");
 
-                if (std.mem.indexOf(u8, line, ":")) |colon_index| {
-                    const key = std.mem.trim(u8, line[0..colon_index], " \r");
-                    const value = std.mem.trim(u8, line[colon_index + 1 ..], " \r");
+                    if (std.mem.eql(u8, key, "Content-Length")) {
+                        contentLength = try std.fmt.parseInt(usize, value, 10);
+                    }
 
-                    const key_owned = try jobAllocator.dupe(u8, key);
-                    const value_owned = try jobAllocator.dupe(u8, value);
-                    try headers.put(key_owned, value_owned);
+                    try headers.put(try jobAllocator.dupe(u8, key), try jobAllocator.dupe(u8, value));
                 }
+            }
+
+            var body: ?[]const u8 = null;
+            if (contentLength > 0) {
+                const bodyBuffer = try jobAllocator.alloc(u8, contentLength);
+                _ = try client_reader.readAll(bodyBuffer);
+                body = bodyBuffer;
             }
 
             const ctx = RequestContext{
@@ -169,10 +220,12 @@ pub const ThreadPool = struct {
                 .client_reader = client_reader,
                 .headers = headers,
                 .route = path.items[0],
+                .method = method,
+                .body = body,
                 .fileCache = self.fileCache,
             };
 
-            if (self.router.routes.get(ctx.route)) |handler| {
+            if (self.router.findHandler(ctx.route, ctx.method)) |handler| {
                 handler(ctx) catch |err| {
                     const error_response = switch (err) {
                         //add whatever errors you need here ig
@@ -212,8 +265,8 @@ pub const ThreadPool = struct {
         }
     }
 
-    pub fn addRoute(self: *ThreadPool, path: []const u8, handler: RouterFn) !void {
-        try self.router.addRoute(path, handler);
+    pub fn addRoute(self: *ThreadPool, path: []const u8, method: HttpMethod, handler: RouterFn) !void {
+        try self.router.addRoute(path, method, handler);
     }
 
     pub fn start(self: *ThreadPool) !void {

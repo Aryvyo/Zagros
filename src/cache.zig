@@ -12,7 +12,6 @@ pub const CacheEntry = struct {
         var hasher = std.hash.Wyhash.init(0);
         hasher.update(contents);
         const hash = std.hash.Wyhash.hash(0, contents);
-        std.debug.print("{any}", .{hash});
         const etag = try std.fmt.allocPrint(allocator, "\"{any}\"", .{hash});
         self.* = .{
             .contents = try allocator.dupe(u8, contents),

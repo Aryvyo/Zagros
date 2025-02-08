@@ -17,18 +17,27 @@ pub fn parseCookies(allocator: std.mem.Allocator, cookie_header: []const u8) std
     return cookies;
 }
 
-pub fn getPath(first_line: []const u8, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
-    // Split "GET /path HTTP/1.1" into parts
-    std.debug.print("{s}", .{first_line});
-    var iter = std.mem.splitAny(u8, first_line, " ");
-    _ = iter.next() orelse return error.InvalidRequest; // Skip HTTP method
-    const path = iter.next() orelse return error.InvalidRequest;
-    var pathIter = std.mem.splitAny(u8, path, "/");
-    _ = pathIter.next();
+pub fn getPath(path_raw: []const u8, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
     var paths = std.ArrayList([]const u8).init(allocator);
-    while (pathIter.next()) |split| {
-        try paths.append(split);
+
+    const path = if (std.mem.indexOf(u8, path_raw, " HTTP/")) |versionIdx|
+        path_raw[0..versionIdx]
+    else
+        path_raw;
+
+    var pathIter = std.mem.split(u8, path, "/");
+    _ = pathIter.next();
+
+    while (pathIter.next()) |component| {
+        if (component.len > 0) {
+            try paths.append(try allocator.dupe(u8, component));
+        }
     }
+
+    if (paths.items.len == 0) {
+        try paths.append(try allocator.dupe(u8, ""));
+    }
+
     return paths;
 }
 

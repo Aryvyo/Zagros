@@ -26,7 +26,7 @@ fn handleFileChange(event: static.FileEvent, pool: *threadPool.ThreadPool) !void
     switch (event.change) {
         .added => {
             std.debug.print("Adding route for new file: {s}\n", .{event.path});
-            try pool.addRoute(event.path, static.serveStatic);
+            try pool.addRoute(event.path, .GET, static.serveStatic);
         },
         .modified => {
             std.debug.print("File modified: {s}\n", .{event.path});
