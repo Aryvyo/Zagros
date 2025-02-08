@@ -89,7 +89,6 @@ pub const StaticFileServer = struct {
                     if (known_file.modified != stat.mtime) {
                         std.debug.print("File changed detected: {s}\n", .{entry.name});
                         known_file.modified = stat.mtime;
-                        std.debug.print("{any} and {any}\n", .{ known_file.modified, stat.mtime });
                         try self.onChange(.{
                             .path = entry.name,
                             .change = .modified,
@@ -109,14 +108,38 @@ pub const StaticFileServer = struct {
     }
 };
 
+// TODO: investigate why its ever so slightly slower since implementing etags (.3ms -> 2ms)?
 pub fn serveStatic(ctx: ThreadPool.RequestContext) !void {
     const allocator = ctx.allocator;
     const route = ctx.route;
 
     if (ctx.fileCache.get(route)) |entry| {
-        const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\n\r\n{s}", .{
+        if (ctx.headers.get("If-None-Match")) |client_etag| {
+            if (std.mem.eql(u8, client_etag, entry.etag)) {
+                const not_modified = try std.fmt.allocPrint(allocator,
+                    \\HTTP/1.1 304 Not Modified
+                    \\ETag: {s}
+                    \\Cache-Control: public, max-age=3600
+                    \\
+                    \\
+                , .{entry.etag});
+                try ctx.client_writer.writeAll(not_modified);
+                return;
+            }
+        }
+
+        const response = try std.fmt.allocPrint(allocator,
+            \\HTTP/1.1 200 OK
+            \\Content-Type: {s}
+            \\Content-Length: {d}
+            \\ETag: {s}
+            \\Cache-Control: public, max-age=3600
+            \\
+            \\{s}
+        , .{
             getContentType(route),
             entry.contents.len,
+            entry.etag,
             entry.contents,
         });
         defer allocator.free(response);
@@ -124,15 +147,32 @@ pub fn serveStatic(ctx: ThreadPool.RequestContext) !void {
         return;
     }
 
-    std.debug.print("finding file", .{});
     const cwd = std.fs.cwd();
-
     const file = try cwd.openFile(try std.fmt.allocPrint(allocator, "static/{s}", .{route}), .{ .mode = .read_only });
     defer file.close();
-
     const file_contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(file_contents);
 
-    const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\n\r\n{s}", .{ getContentType(route), file_contents.len, file_contents });
+    var hasher = std.hash.Wyhash.init(0);
+    hasher.update(file_contents);
+    const hash = hasher.final();
+    const etag = try std.fmt.allocPrint(allocator, "\"{x}\"", .{hash});
+    defer allocator.free(etag);
+
+    const response = try std.fmt.allocPrint(allocator,
+        \\HTTP/1.1 200 OK
+        \\Content-Type: {s}
+        \\Content-Length: {d}
+        \\ETag: {s}
+        \\Cache-Control: public, max-age=3600
+        \\
+        \\{s}
+    , .{
+        getContentType(route),
+        file_contents.len,
+        etag,
+        file_contents,
+    });
     defer allocator.free(response);
     try ctx.client_writer.writeAll(response);
 }

@@ -3,27 +3,43 @@ const std = @import("std");
 pub const CacheEntry = struct {
     contents: []const u8,
     modified: i128,
+    etag: []const u8,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, contents: []const u8, modified: i128) !*CacheEntry {
         const self = try allocator.create(CacheEntry);
 
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(contents);
+        const hash = std.hash.Wyhash.hash(0, contents);
+        std.debug.print("{any}", .{hash});
+        const etag = try std.fmt.allocPrint(allocator, "\"{any}\"", .{hash});
         self.* = .{
             .contents = try allocator.dupe(u8, contents),
             .modified = modified,
             .allocator = allocator,
+            .etag = etag,
         };
         return self;
     }
 
     pub fn deinit(self: *CacheEntry) void {
         self.allocator.free(self.contents);
+        self.allocator.free(self.etag);
         self.allocator.destroy(self);
     }
 
     pub fn update(self: *CacheEntry, newContents: []const u8, newModified: i128) anyerror!void {
+        const dupedContents = try self.allocator.dupe(u8, newContents);
+
+        const hash = std.hash.Wyhash.hash(0, dupedContents);
+        const newEtag = try std.fmt.allocPrint(self.allocator, "\"{any}\"", .{hash});
+
         self.allocator.free(self.contents);
-        self.contents = try self.allocator.dupe(u8, newContents);
+        self.allocator.free(self.etag);
+
+        self.contents = dupedContents;
+        self.etag = newEtag;
         self.modified = newModified;
     }
 };

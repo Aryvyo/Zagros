@@ -51,7 +51,7 @@ pub fn main() !void {
     try pool.start();
 
     const addr = try net.Address.resolveIp("127.0.0.1", 8080);
-    var server = try addr.listen(.{});
+    var server = try addr.listen(.{ .reuse_address = true });
     defer server.deinit();
 
     std.debug.print("Server listening on 127.0.0.1:8080\n", .{});
