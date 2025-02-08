@@ -5,6 +5,7 @@ const threadPool = @import("threadPool.zig");
 const utils = @import("utils.zig");
 const static = @import("static.zig");
 const cache = @import("cache.zig");
+const config = @import("config.zig");
 
 pub const RequestContext = struct {
     allocator: std.mem.Allocator,
@@ -43,18 +44,21 @@ pub fn main() !void {
     defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
+    var serverConfig = try config.ServerConfig.loadFromFile(allocator, "server.cfg");
+    defer serverConfig.deinit();
+
     var fileCache = cache.Cache.init(allocator);
     defer fileCache.deinit();
 
-    var pool = try threadPool.ThreadPool.init(allocator, 4, &fileCache);
+    var pool = try threadPool.ThreadPool.init(allocator, serverConfig.thread_count, &fileCache);
     defer pool.deinit();
     try pool.start();
 
-    const addr = try net.Address.resolveIp("127.0.0.1", 8080);
+    const addr = try net.Address.resolveIp(serverConfig.address, serverConfig.port);
     var server = try addr.listen(.{ .reuse_address = true });
     defer server.deinit();
 
-    std.debug.print("Server listening on 127.0.0.1:8080\n", .{});
+    std.debug.print("Server listening on {s}:{d}\n", .{ serverConfig.address, serverConfig.port });
 
     var staticServer = static.StaticFileServer.init(
         allocator,

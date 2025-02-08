@@ -19,4 +19,5 @@ zig-out/
 static/
 responses.txt
 board.db
+*.cfg
 .glimpse
