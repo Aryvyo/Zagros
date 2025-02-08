@@ -1,6 +1,7 @@
 const std = @import("std");
 const ThreadPool = @import("threadPool.zig");
 const cache = @import("cache.zig");
+const File = @import("file.zig");
 
 pub const FileChange = enum {
     added,
@@ -121,7 +122,14 @@ pub fn serveStatic(ctx: ThreadPool.RequestContext) !void {
     const allocator = ctx.allocator;
     const route = ctx.route;
 
+    const acceptsGzip = if (ctx.headers.get("Accept-Encoding")) |encoding|
+        std.mem.indexOf(u8, encoding, "gzip") != null
+    else
+        false;
+
     if (ctx.fileCache.get(route)) |entry| {
+        const contentType = getContentType(route);
+
         if (ctx.headers.get("If-None-Match")) |client_etag| {
             if (std.mem.eql(u8, client_etag, entry.etag)) {
                 const not_modified = try std.fmt.allocPrint(allocator,
@@ -136,6 +144,16 @@ pub fn serveStatic(ctx: ThreadPool.RequestContext) !void {
             }
         }
 
+        const isCompressable = acceptsGzip and File.shouldCompress(contentType, entry.contents.len);
+
+        var contents: []const u8 = entry.contents;
+        var compressed: ?[]u8 = undefined;
+
+        if (isCompressable) {
+            compressed = try File.gzipCompress(allocator, entry.contents);
+            contents = compressed.?;
+        }
+
         const response = try std.fmt.allocPrint(allocator,
             \\HTTP/1.1 200 OK
             \\Content-Type: {s}
@@ -146,9 +164,9 @@ pub fn serveStatic(ctx: ThreadPool.RequestContext) !void {
             \\{s}
         , .{
             getContentType(route),
-            entry.contents.len,
+            contents.len,
             entry.etag,
-            entry.contents,
+            contents,
         });
         defer allocator.free(response);
         try ctx.client_writer.writeAll(response);
