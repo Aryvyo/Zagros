@@ -1,8 +1,69 @@
 
 
-# Example of how to serve a page
+# Zagros
+
+A simple, fast server built in Zig!
+
+I started this project for fun, and have been working on it for the same reason since. If there are parts that just aren't good code, or you disagree with, feel free to let me know in an issue or contribute to fix it! I'm here to learn before everything else and I understand I'll make mistakes or do stuff the 'wrong' way :)
+
+
+## Installation
+
+Requirements:
+
+- Zig 0.13
+
+The server is very DIY, if you wish to run it:
+
+```bash
+  git clone https://github.com/Aryvyo/Zagros.git
+  cd Zagros
+  zig build run
+```
+
+This barebones compile will read from (and create) a `static/` directory, any files in this directory will be served as is under a route with their file name.
+
+    
+## Configuration
+
+Upon first startup, the program will generate a `server.cfg` file
+
+This will contain the following:
 
 ```
+# Server Configuration
+# Default configuration file created automatically
+
+# Network settings
+address = 127.0.0.1
+port = 8080
+
+# Performance settings
+thread_count = 4
+```
+
+## Reference
+
+The main functions you'll care about are:
+
+#### Add a route 
+
+`
+  ThreadPool.addRoute(path: []const u8, method:HttpMethod, handler: RouterFn);
+`
+
+#### Parse form data
+
+`
+  utils.parseFormData(allocator:std.mem.Allocator,body:[]const u8);
+` 
+
+which returns a `StringHasmap([]const u8)`
+
+
+
+## Example
+```zig
 fn handleIndex(ctx: ThreadPool.RequestContext) !void {
     const html =
         \\<html lang="en">
@@ -34,8 +95,10 @@ fn handleIndex(ctx: ThreadPool.RequestContext) !void {
 }
 ```
 
-throw this in main.zig, or anywhere else i guess, or you can just embedFile and load it and send that
+throw this in `main.zig`, or anywhere else i guess, or you can just embedFile and load it and send that
+
 or do it dynamically
+
 up to you man
 
 then to serve it
@@ -46,4 +109,14 @@ same procedure for serving a stylesheet etc, just ensure the routes match up, in
 
 `try pool.addRoute("styles.css", .GET, serveCss);` etc
 
-rough implementation for now thinking of how to make this more intuitive 
+(rough implementation for now thinking of how to make this more intuitive)
+
+
+## Contributing
+
+Contributions are always welcome!
+
+Just open a PR and I'll read over it!
+
+
+
