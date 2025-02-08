@@ -40,10 +40,10 @@ up to you man
 
 then to serve it
 
-`try pool.addRoute("", handleIndex);`
+`try pool.addRoute("", .GET, handleIndex);`
 
 same procedure for serving a stylesheet etc, just ensure the routes match up, in the above example you'd have
 
-`try pool.addRoute("styles.css", serveCss);` etc
+`try pool.addRoute("styles.css", .GET, serveCss);` etc
 
 rough implementation for now thinking of how to make this more intuitive 
