@@ -86,14 +86,6 @@ pub const StaticFileServer = struct {
 
                 try self.fileCache.put(entry.name, contents, stat.mtime);
 
-                //i think this is kind of dumb and janky and stupid but i honestly cannot be bothered to write something nicer looking than this, thousand apologies
-                if (std.mem.eql(u8, entry.name, "index.html")) {
-                    try self.onChange(.{
-                        .path = "",
-                        .change = if (self.files.contains(entry.name)) .modified else .added,
-                    }, self.pool);
-                }
-
                 if (self.files.get(entry.name)) |known_file| {
                     if (known_file.modified != stat.mtime) {
                         std.debug.print("File changed detected: {s}\n", .{entry.name});
