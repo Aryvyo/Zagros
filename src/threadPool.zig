@@ -1,6 +1,7 @@
 const std = @import("std");
 const net = std.net;
 const utils = @import("utils.zig");
+const cache = @import("cache.zig");
 
 pub const RequestContext = struct {
     allocator: std.mem.Allocator,
@@ -8,6 +9,7 @@ pub const RequestContext = struct {
     client_reader: std.net.Stream.Reader,
     headers: std.StringHashMap([]const u8),
     route: []const u8,
+    fileCache: *cache.Cache,
 };
 
 pub const RouterFn = *const fn (RequestContext) anyerror!void;
@@ -94,8 +96,9 @@ pub const ThreadPool = struct {
     allocator: std.mem.Allocator,
     shutdown: std.atomic.Value(bool),
     router: Router,
+    fileCache: *cache.Cache,
 
-    pub fn init(allocator: std.mem.Allocator, thread_count: usize) !ThreadPool {
+    pub fn init(allocator: std.mem.Allocator, thread_count: usize, fileCache: *cache.Cache) !ThreadPool {
         const threads = try allocator.alloc(std.Thread, thread_count);
 
         const pool = ThreadPool{
@@ -104,6 +107,7 @@ pub const ThreadPool = struct {
             .allocator = allocator,
             .shutdown = std.atomic.Value(bool).init(false),
             .router = Router.init(allocator),
+            .fileCache = fileCache,
         };
 
         return pool;
@@ -165,6 +169,7 @@ pub const ThreadPool = struct {
                 .client_reader = client_reader,
                 .headers = headers,
                 .route = path.items[0],
+                .fileCache = self.fileCache,
             };
 
             if (self.router.routes.get(ctx.route)) |handler| {

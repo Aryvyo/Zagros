@@ -1,9 +1,10 @@
 const std = @import("std");
 const net = std.net;
 const f = @import("file.zig");
-const ThreadPool = @import("threadPool.zig");
+const threadPool = @import("threadPool.zig");
 const utils = @import("utils.zig");
 const static = @import("static.zig");
+const cache = @import("cache.zig");
 
 pub const RequestContext = struct {
     allocator: std.mem.Allocator,
@@ -21,7 +22,7 @@ const http_response =
     \\
 ;
 
-fn handleFileChange(event: static.FileEvent, pool: *ThreadPool.ThreadPool) !void {
+fn handleFileChange(event: static.FileEvent, pool: *threadPool.ThreadPool) !void {
     switch (event.change) {
         .added => {
             std.debug.print("Adding route for new file: {s}\n", .{event.path});
@@ -42,7 +43,10 @@ pub fn main() !void {
     defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
-    var pool = try ThreadPool.ThreadPool.init(allocator, 4);
+    var fileCache = cache.Cache.init(allocator);
+    defer fileCache.deinit();
+
+    var pool = try threadPool.ThreadPool.init(allocator, 4, &fileCache);
     defer pool.deinit();
     try pool.start();
 
@@ -52,7 +56,12 @@ pub fn main() !void {
 
     std.debug.print("Server listening on 127.0.0.1:8080\n", .{});
 
-    var staticServer = static.StaticFileServer.init(allocator, handleFileChange, &pool);
+    var staticServer = static.StaticFileServer.init(
+        allocator,
+        handleFileChange,
+        &pool,
+        &fileCache,
+    );
     defer staticServer.deinit();
 
     try staticServer.checkForChanges();

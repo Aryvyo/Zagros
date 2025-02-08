@@ -1,5 +1,6 @@
 const std = @import("std");
 const ThreadPool = @import("threadPool.zig");
+const cache = @import("cache.zig");
 
 pub const FileChange = enum {
     added,
@@ -38,13 +39,20 @@ pub const StaticFileServer = struct {
     allocator: std.mem.Allocator,
     onChange: *const fn (FileEvent, *ThreadPool.ThreadPool) anyerror!void,
     pool: *ThreadPool.ThreadPool,
+    fileCache: *cache.Cache,
 
-    pub fn init(allocator: std.mem.Allocator, onChange: *const fn (FileEvent, *ThreadPool.ThreadPool) anyerror!void, pool: *ThreadPool.ThreadPool) StaticFileServer {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        onChange: *const fn (FileEvent, *ThreadPool.ThreadPool) anyerror!void,
+        pool: *ThreadPool.ThreadPool,
+        fileCache: *cache.Cache,
+    ) StaticFileServer {
         return .{
             .files = std.StringHashMap(*StaticFile).init(allocator),
             .allocator = allocator,
             .onChange = onChange,
             .pool = pool,
+            .fileCache = fileCache,
         };
     }
 
@@ -72,11 +80,16 @@ pub const StaticFileServer = struct {
                 const file = try static_dir.openFile(entry.name, .{});
                 defer file.close();
                 const stat = try file.stat();
+                const contents = try file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
+                defer self.allocator.free(contents);
+
+                try self.fileCache.put(entry.name, contents, stat.mtime);
 
                 if (self.files.get(entry.name)) |known_file| {
                     if (known_file.modified != stat.mtime) {
                         std.debug.print("File changed detected: {s}\n", .{entry.name});
                         known_file.modified = stat.mtime;
+                        std.debug.print("{any} and {any}\n", .{ known_file.modified, stat.mtime });
                         try self.onChange(.{
                             .path = entry.name,
                             .change = .modified,
@@ -100,6 +113,18 @@ pub fn serveStatic(ctx: ThreadPool.RequestContext) !void {
     const allocator = ctx.allocator;
     const route = ctx.route;
 
+    if (ctx.fileCache.get(route)) |entry| {
+        const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\n\r\n{s}", .{
+            getContentType(route),
+            entry.contents.len,
+            entry.contents,
+        });
+        defer allocator.free(response);
+        try ctx.client_writer.writeAll(response);
+        return;
+    }
+
+    std.debug.print("finding file", .{});
     const cwd = std.fs.cwd();
 
     const file = try cwd.openFile(try std.fmt.allocPrint(allocator, "static/{s}", .{route}), .{ .mode = .read_only });
@@ -107,16 +132,18 @@ pub fn serveStatic(ctx: ThreadPool.RequestContext) !void {
 
     const file_contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
 
-    var content_type: []const u8 = "";
-    if (std.mem.endsWith(u8, route, ".html")) {
-        content_type = "text/html";
-    } else if (std.mem.endsWith(u8, route, ".css")) {
-        content_type = "text/css";
-    } else if (std.mem.endsWith(u8, route, ".js")) {
-        content_type = "application/javascript";
-    }
-
-    const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\n\r\n{s}", .{ content_type, file_contents.len, file_contents });
+    const response = try std.fmt.allocPrint(allocator, "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\n\r\n{s}", .{ getContentType(route), file_contents.len, file_contents });
     defer allocator.free(response);
     try ctx.client_writer.writeAll(response);
+}
+
+fn getContentType(route: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, route, ".html")) {
+        return "text/html";
+    } else if (std.mem.endsWith(u8, route, ".css")) {
+        return "text/css";
+    } else if (std.mem.endsWith(u8, route, ".js")) {
+        return "application/javascript";
+    }
+    return "application/octet-stream";
 }
