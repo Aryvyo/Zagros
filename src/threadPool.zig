@@ -94,12 +94,14 @@ pub const JobQueue = struct {
     mutex: std.Thread.Mutex,
     condition: std.Thread.Condition,
     jobs: std.ArrayList(Job),
+    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) JobQueue {
         return .{
             .mutex = .{},
             .condition = .{},
             .jobs = std.ArrayList(Job).init(allocator),
+            .allocator = allocator,
         };
     }
 
@@ -115,13 +117,20 @@ pub const JobQueue = struct {
         self.condition.signal();
     }
 
-    pub fn waitAndPop(self: *JobQueue) *Job {
+    // return a copy instead of a pointer
+    pub fn waitAndPop(self: *JobQueue) !Job {
         self.mutex.lock();
         defer self.mutex.unlock();
+
         while (self.jobs.items.len == 0) {
             self.condition.wait(&self.mutex);
         }
-        return &self.jobs.items[0];
+
+        // make a copy of the job before removing it
+        const job = self.jobs.items[0];
+        _ = self.jobs.orderedRemove(0);
+
+        return job;
     }
 
     pub fn removeFront(self: *JobQueue) void {
@@ -173,13 +182,20 @@ pub const ThreadPool = struct {
 
             const strt = timer.lap();
 
-            const job_ptr = self.job_queue.waitAndPop();
+            // get a copy of the job instead of a pointer
+            const job = self.job_queue.waitAndPop() catch |err| {
+                std.debug.print("Error getting job: {}\n", .{err});
+                continue;
+            };
 
-            const jobAllocator = job_ptr.arena.allocator();
+            // use defer to ensure cleanup
+            defer job.deinit();
+
+            const jobAllocator = job.arena.allocator();
             var headers = std.StringHashMap([]const u8).init(jobAllocator);
 
-            const client_reader = job_ptr.client.stream.reader();
-            const client_writer = job_ptr.client.stream.writer();
+            const client_reader = job.client.stream.reader();
+            const client_writer = job.client.stream.writer();
 
             const first_line = (try client_reader.readUntilDelimiterOrEofAlloc(jobAllocator, '\n', 65536)) orelse return error.InvalidRequest;
             var firstLineIter = std.mem.split(u8, first_line, " ");
@@ -239,7 +255,7 @@ pub const ThreadPool = struct {
                     };
                     client_writer.writeAll(error_response) catch {};
                     std.debug.print("Error in worker: {}\n", .{err});
-                    job_ptr.deinit();
+                    job.deinit();
                     self.job_queue.removeFront();
                     return;
                 };
@@ -260,7 +276,7 @@ pub const ThreadPool = struct {
 
             const end = timer.read();
             const elapsedtime = @as(f64, @floatFromInt(end - strt)) / 1_000_000_000.0;
-
+            
             std.debug.print("Request took {d:.2}ms\n", .{elapsedtime});
         }
     }

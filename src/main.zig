@@ -6,6 +6,7 @@ const utils = @import("utils.zig");
 const static = @import("static.zig");
 const cache = @import("cache.zig");
 const config = @import("config.zig");
+const RequestQueue = @import("queue.zig").RequestQueue;
 
 pub const RequestContext = struct {
     allocator: std.mem.Allocator,
@@ -39,6 +40,17 @@ fn handleFileChange(event: static.FileEvent, pool: *threadPool.ThreadPool) !void
     }
 }
 
+fn processRequests(pool: *threadPool.ThreadPool, queue: *RequestQueue) !void {
+    while (true) {
+        const client = queue.dequeue() catch |err| {
+            if (err == error.QueueClosed) break;
+            std.debug.print("Error dequeuing request: {any}\n", .{err});
+            continue;
+        };
+        try pool.submit(client);
+    }
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa.deinit() == .ok);
@@ -54,11 +66,25 @@ pub fn main() !void {
     defer pool.deinit();
     try pool.start();
 
+    // initialize request queue, make it configurable
+    const MAX_QUEUE_SIZE = 1000;
+    var request_queue = RequestQueue.init(allocator, MAX_QUEUE_SIZE);
+    defer request_queue.deinit();
+
+    // start worker threads for processing requests, make it configurable
+    const WORKER_COUNT = 4;
+    var workers: [WORKER_COUNT]std.Thread = undefined;
+    for (&workers) |*worker| {
+        worker.* = try std.Thread.spawn(.{}, processRequests, .{ &pool, &request_queue });
+    }
+    defer for (workers) |worker| worker.join();
+
     const addr = try net.Address.resolveIp(serverConfig.address, serverConfig.port);
     var server = try addr.listen(.{ .reuse_address = true });
     defer server.deinit();
 
-    std.debug.print("Server listening on {s}:{d}\n", .{ serverConfig.address, serverConfig.port });
+    // now you can click when starting
+    std.debug.print("Server listening on \x1B]8;;http://{s}:{d}\x07http://{s}:{d}\x1B]8;;\x07\n", .{ serverConfig.address, serverConfig.port, serverConfig.address, serverConfig.port });
 
     var staticServer = static.StaticFileServer.init(
         allocator,
@@ -84,8 +110,37 @@ pub fn main() !void {
     const watcher = try std.Thread.spawn(.{}, WatcherContext.watch, .{&staticServer});
     defer watcher.join();
 
+    // main server loop with request queue and monitoring
     while (true) {
-        const client = try server.accept();
-        try pool.submit(client);
+        const client = server.accept() catch |err| {
+            std.debug.print("Error accepting connection: {any}\n", .{err});
+            continue;
+        };
+
+        request_queue.enqueue(client) catch |err| {
+            std.debug.print("Failed to enqueue request: {any}\n", .{err});
+            client.stream.close();
+            continue;
+        };
+
+        // print stats every 100 requests, make config to disable it
+        if (request_queue.getCurrentSize() % 100 == 0) {
+            const stats = request_queue.getStats();
+            std.debug.print(
+                \\queue stats:
+                \\  Current size: {d}
+                \\  Total enqueued: {d}
+                \\  Total dequeued: {d}
+                \\  Rejected: {d}
+                \\  High Water Mark: {d}
+                \\
+            , .{
+                request_queue.getCurrentSize(),
+                stats.total_enqueued,
+                stats.total_dequeued,
+                stats.rejected_count,
+                stats.high_water_mark,
+            });
+        }
     }
 }
