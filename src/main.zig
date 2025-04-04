@@ -60,29 +60,29 @@ pub fn main() !void {
 
     std.debug.print("Server listening on {s}:{d}\n", .{ serverConfig.address, serverConfig.port });
 
-    var staticServer = static.StaticFileServer.init(
-        allocator,
-        handleFileChange,
-        &pool,
-        &fileCache,
-    );
-    defer staticServer.deinit();
+    //var staticServer = static.StaticFileServer.init(
+    //    allocator,
+    //    handleFileChange,
+    //    &pool,
+    //    &fileCache,
+    //);
+    //defer staticServer.deinit();
 
-    try staticServer.checkForChanges();
+    //try staticServer.checkForChanges();
 
-    const WatcherContext = struct {
-        fn watch(sServer: *static.StaticFileServer) !void {
-            while (true) {
-                sServer.checkForChanges() catch |err| {
-                    std.debug.print("Error occurred watching for changes: {any}\n", .{err});
-                };
-                std.time.sleep(1 * std.time.ns_per_s);
-            }
-        }
-    };
+    //const WatcherContext = struct {
+    //    fn watch(sServer: *static.StaticFileServer) !void {
+    //        while (true) {
+    //            sServer.checkForChanges() catch |err| {
+    //                std.debug.print("Error occurred watching for changes: {any}\n", .{err});
+    //            };
+    //            std.time.sleep(1 * std.time.ns_per_s);
+    //        }
+    //    }
+    //};
 
-    const watcher = try std.Thread.spawn(.{}, WatcherContext.watch, .{&staticServer});
-    defer watcher.join();
+    //const watcher = try std.Thread.spawn(.{}, WatcherContext.watch, .{&staticServer});
+    //defer watcher.join();
 
     while (true) {
         const client = try server.accept();
