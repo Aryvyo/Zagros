@@ -60,15 +60,15 @@ pub fn main() !void {
 
     std.debug.print("Server listening on {s}:{d}\n", .{ serverConfig.address, serverConfig.port });
 
-    //var staticServer = static.StaticFileServer.init(
-    //    allocator,
-    //    handleFileChange,
-    //    &pool,
-    //    &fileCache,
-    //);
-    //defer staticServer.deinit();
+    var staticServer = static.StaticFileServer.init(
+        allocator,
+        handleFileChange,
+        &pool,
+        &fileCache,
+    );
+    defer staticServer.deinit();
 
-    //try staticServer.checkForChanges();
+    try staticServer.checkForChanges();
 
     //const WatcherContext = struct {
     //    fn watch(sServer: *static.StaticFileServer) !void {
