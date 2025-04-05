@@ -29,9 +29,7 @@ fn handleFileChange(event: static.FileEvent, pool: *threadPool.ThreadPool) !void
             std.debug.print("Adding route for new file: {s}\n", .{event.path});
             try pool.addRoute(event.path, .GET, static.serveStatic);
         },
-        .modified => {
-            std.debug.print("File modified: {s}\n", .{event.path});
-        },
+        .modified => {},
         .deleted => {
             std.debug.print("File deleted: {s}\n", .{event.path});
             // TODO: try pool.removeRoute(event.path);
@@ -83,19 +81,19 @@ pub fn main() !void {
 
     try staticServer.checkForChanges();
 
-    //const WatcherContext = struct {
-    //    fn watch(sServer: *static.StaticFileServer) !void {
-    //        while (true) {
-    //            sServer.checkForChanges() catch |err| {
-    //                std.debug.print("Error occurred watching for changes: {any}\n", .{err});
-    //            };
-    //            std.time.sleep(1 * std.time.ns_per_s);
-    //        }
-    //    }
-    //};
+    const WatcherContext = struct {
+        fn watch(sServer: *static.StaticFileServer) !void {
+            while (true) {
+                sServer.checkForChanges() catch |err| {
+                    std.debug.print("Error occurred watching for changes: {any}\n", .{err});
+                };
+                std.time.sleep(1 * std.time.ns_per_s);
+            }
+        }
+    };
 
-    //const watcher = try std.Thread.spawn(.{}, WatcherContext.watch, .{&staticServer});
-    //defer watcher.join();
+    const watcher = try std.Thread.spawn(.{}, WatcherContext.watch, .{&staticServer});
+    defer watcher.join();
 
     while (true) {
         const client = try server.accept();

@@ -88,7 +88,7 @@ pub const StaticFileServer = struct {
 
                 if (self.files.get(entry.name)) |known_file| {
                     if (known_file.modified != stat.mtime) {
-                        std.debug.print("File changed detected: {s}\n", .{entry.name});
+                        std.debug.print("File change detected: {s}\n", .{entry.name});
                         known_file.modified = stat.mtime;
                         try self.onChange(.{
                             .path = entry.name,
