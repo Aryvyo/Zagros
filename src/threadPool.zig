@@ -186,7 +186,12 @@ pub const ThreadPool = struct {
             const methodStr = firstLineIter.next() orelse return error.InvalidRequest;
             const pathRaw = firstLineIter.next() orelse return error.InvalidRequest;
 
-            const method = HttpMethod.fromString(methodStr) orelse return error.UnsupportedMethod;
+            const method = HttpMethod.fromString(methodStr) orelse {
+                std.debug.print("Unsupported method: {s}. Shutting down worker.\n", .{methodStr});
+                job_ptr.deinit();
+                self.job_queue.removeFront();
+                break; // exit loop gracefully, ending this worker thread
+            };
             const path = try utils.getPath(pathRaw, jobAllocator);
 
             std.debug.print("Requested path: /{s}, extras: {any}\n", .{ path.items[0], path.items[1..] });
