@@ -40,6 +40,9 @@ port = 8080
 
 # Performance settings
 thread_count = 4
+
+#Print time taken per request
+display_time = false 
 ```
 
 ## Reference
