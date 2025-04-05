@@ -50,7 +50,7 @@ pub fn main() !void {
     var fileCache = cache.Cache.init(allocator);
     defer fileCache.deinit();
 
-    var pool = try threadPool.ThreadPool.init(allocator, serverConfig.thread_count, &fileCache);
+    var pool = try threadPool.ThreadPool.init(allocator, serverConfig.thread_count, &fileCache, serverConfig);
     defer pool.deinit();
     try pool.start();
 

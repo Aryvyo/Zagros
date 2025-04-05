@@ -2,6 +2,7 @@ const std = @import("std");
 const net = std.net;
 const utils = @import("utils.zig");
 const cache = @import("cache.zig");
+const config = @import("config.zig");
 
 pub const HttpMethod = enum {
     GET,
@@ -133,8 +134,9 @@ pub const ThreadPool = struct {
     shutdown: std.atomic.Value(bool),
     router: Router,
     fileCache: *cache.Cache,
+    config: config.ServerConfig,
 
-    pub fn init(allocator: std.mem.Allocator, thread_count: usize, fileCache: *cache.Cache) !ThreadPool {
+    pub fn init(allocator: std.mem.Allocator, thread_count: usize, fileCache: *cache.Cache, cfg: config.ServerConfig) !ThreadPool {
         const threads = try allocator.alloc(std.Thread, thread_count);
 
         const pool = ThreadPool{
@@ -144,6 +146,7 @@ pub const ThreadPool = struct {
             .shutdown = std.atomic.Value(bool).init(false),
             .router = Router.init(allocator),
             .fileCache = fileCache,
+            .config = cfg,
         };
 
         return pool;
@@ -179,6 +182,10 @@ pub const ThreadPool = struct {
     }
 
     fn processJob(self: *ThreadPool, jobAllocator: std.mem.Allocator, job_ptr: *Job) !void {
+        var timer = try std.time.Timer.start();
+
+        const strt = timer.read();
+
         var headers = std.StringHashMap([]const u8).init(jobAllocator);
 
         const client_reader = job_ptr.client.stream.reader();
@@ -255,6 +262,13 @@ pub const ThreadPool = struct {
                 \\
             ;
             try client_writer.writeAll(not_found_response);
+        }
+
+        const end = timer.read();
+        const elapsedtime = @as(f64, @floatFromInt(end - strt)) / std.time.ns_per_ms;
+
+        if (self.config.display_time == true) {
+            std.debug.print("Request took {d:.2}ms\n", .{elapsedtime});
         }
     }
 
