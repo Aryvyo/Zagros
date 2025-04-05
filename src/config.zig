@@ -37,7 +37,7 @@ pub const ServerConfig = struct {
         self.allocator.free(self.address);
     }
 
-    fn createDefaultConfig(path: []const u8) !void {
+    pub fn createDefaultConfig(path: []const u8) !void {
         const file = try std.fs.cwd().createFile(path, .{
             .read = true,
             .truncate = true,

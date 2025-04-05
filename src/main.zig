@@ -39,11 +39,24 @@ fn handleFileChange(event: static.FileEvent, pool: *threadPool.ThreadPool) !void
     }
 }
 
+fn writeConfigAndQuit() !void {
+    _ = try config.ServerConfig.createDefaultConfig("server.cfg");
+
+    std.process.exit(1);
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
+    const args = try std.process.argsAlloc(allocator);
+
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--config")) {
+            _ = try writeConfigAndQuit();
+        }
+    }
     var serverConfig = try config.ServerConfig.loadFromFile(allocator, "server.cfg");
     defer serverConfig.deinit();
 
