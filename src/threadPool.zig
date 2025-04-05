@@ -30,6 +30,7 @@ pub const RequestContext = struct {
     client_reader: std.net.Stream.Reader,
     headers: std.StringHashMap([]const u8),
     route: []const u8,
+    extras: []const u8,
     method: HttpMethod,
     fileCache: *cache.Cache,
     body: ?[]const u8 = null,
@@ -121,13 +122,7 @@ pub const JobQueue = struct {
         while (self.jobs.items.len == 0) {
             self.condition.wait(&self.mutex);
         }
-        return &self.jobs.items[0];
-    }
-
-    pub fn removeFront(self: *JobQueue) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        _ = self.jobs.orderedRemove(0);
+        return @constCast(&self.jobs.orderedRemove(0));
     }
 };
 
@@ -169,104 +164,97 @@ pub const ThreadPool = struct {
 
     fn workerFn(self: *ThreadPool) !void {
         while (!self.shutdown.load(.acquire)) {
-            var timer = try std.time.Timer.start();
-
-            const strt = timer.lap();
-
             const job_ptr = self.job_queue.waitAndPop();
-
             const jobAllocator = job_ptr.arena.allocator();
-            var headers = std.StringHashMap([]const u8).init(jobAllocator);
 
-            const client_reader = job_ptr.client.stream.reader();
-            const client_writer = job_ptr.client.stream.writer();
-
-            const first_line = (try client_reader.readUntilDelimiterOrEofAlloc(jobAllocator, '\n', 65536)) orelse return error.InvalidRequest;
-            var firstLineIter = std.mem.split(u8, first_line, " ");
-            const methodStr = firstLineIter.next() orelse return error.InvalidRequest;
-            const pathRaw = firstLineIter.next() orelse return error.InvalidRequest;
-
-            const method = HttpMethod.fromString(methodStr) orelse {
-                std.debug.print("Unsupported method: {s}. Shutting down worker.\n", .{methodStr});
+            defer {
                 job_ptr.deinit();
-                self.job_queue.removeFront();
-                break; // exit loop gracefully, ending this worker thread
+            }
+
+            self.processJob(jobAllocator, job_ptr) catch |err| {
+                std.debug.print("job error:{}\n", .{err});
+                continue;
             };
-            const path = try utils.getPath(pathRaw, jobAllocator);
+        }
+    }
 
-            std.debug.print("Requested path: /{s}, extras: {any}\n", .{ path.items[0], path.items[1..] });
+    fn processJob(self: *ThreadPool, jobAllocator: std.mem.Allocator, job_ptr: *Job) !void {
+        var headers = std.StringHashMap([]const u8).init(jobAllocator);
 
-            var contentLength: usize = 0;
-            while (true) {
-                const line = try client_reader.readUntilDelimiterOrEofAlloc(jobAllocator, '\n', 65536) orelse break;
-                if (line.len <= 2) break;
-                if (std.mem.indexOf(u8, line, ":")) |colonIndex| {
-                    const key = std.mem.trim(u8, line[0..colonIndex], " \r");
-                    const value = std.mem.trim(u8, line[colonIndex + 1 ..], " \r");
+        const client_reader = job_ptr.client.stream.reader();
+        const client_writer = job_ptr.client.stream.writer();
 
-                    if (std.mem.eql(u8, key, "Content-Length")) {
-                        contentLength = try std.fmt.parseInt(usize, value, 10);
-                    }
+        const first_line = (try client_reader.readUntilDelimiterOrEofAlloc(jobAllocator, '\n', 65536)) orelse return error.InvalidRequest;
+        var firstLineIter = std.mem.split(u8, first_line, " ");
+        const methodStr = firstLineIter.next() orelse return error.InvalidRequest;
+        const pathRaw = firstLineIter.next() orelse return error.InvalidRequest;
 
-                    try headers.put(try jobAllocator.dupe(u8, key), try jobAllocator.dupe(u8, value));
+        const method = HttpMethod.fromString(methodStr) orelse return error.InvalidMethod;
+        const path = try utils.getPath(pathRaw, jobAllocator);
+
+        std.debug.print("Requested path: /{s}, extras: {any}\n", .{ path.items[0], path.items[1..] });
+
+        var contentLength: usize = 0;
+        while (true) {
+            const line = try client_reader.readUntilDelimiterOrEofAlloc(jobAllocator, '\n', 65536) orelse break;
+            if (line.len <= 2) break;
+            if (std.mem.indexOf(u8, line, ":")) |colonIndex| {
+                const key = std.mem.trim(u8, line[0..colonIndex], " \r");
+                const value = std.mem.trim(u8, line[colonIndex + 1 ..], " \r");
+
+                if (std.mem.eql(u8, key, "Content-Length")) {
+                    contentLength = try std.fmt.parseInt(usize, value, 10);
                 }
+
+                try headers.put(try jobAllocator.dupe(u8, key), try jobAllocator.dupe(u8, value));
             }
+        }
 
-            var body: ?[]const u8 = null;
-            if (contentLength > 0) {
-                const bodyBuffer = try jobAllocator.alloc(u8, contentLength);
-                _ = try client_reader.readAll(bodyBuffer);
-                body = bodyBuffer;
-            }
+        var body: ?[]const u8 = null;
+        if (contentLength > 0) {
+            const bodyBuffer = try jobAllocator.alloc(u8, contentLength);
+            _ = try client_reader.readAll(bodyBuffer);
+            body = bodyBuffer;
+        }
 
-            const ctx = RequestContext{
-                .allocator = jobAllocator,
-                .client_writer = client_writer,
-                .client_reader = client_reader,
-                .headers = headers,
-                .route = path.items[0],
-                .method = method,
-                .body = body,
-                .fileCache = self.fileCache,
-            };
+        const ctx = RequestContext{
+            .allocator = jobAllocator,
+            .client_writer = client_writer,
+            .client_reader = client_reader,
+            .headers = headers,
+            .route = path.items[0],
+            .extras = if (path.items.len > 1) path.items[1] else "",
+            .method = method,
+            .body = body,
+            .fileCache = self.fileCache,
+        };
 
-            if (self.router.findHandler(ctx.route, ctx.method)) |handler| {
-                handler(ctx) catch |err| {
-                    const error_response = switch (err) {
-                        //add whatever errors you need here ig
-                        else =>
-                        \\HTTP/1.1 500 Internal Server Error
-                        \\Content-Type: text/html
-                        \\Content-Length: 37
-                        \\
-                        \\<h1>500 Internal Server Error</h1>
-                        \\
-                    };
-                    client_writer.writeAll(error_response) catch {};
-                    std.debug.print("Error in worker: {}\n", .{err});
-                    job_ptr.deinit();
-                    self.job_queue.removeFront();
-                    return;
-                };
-            } else {
-                const not_found_response =
-                    \\HTTP/1.1 404 Not Found
+        if (self.router.findHandler(ctx.route, ctx.method)) |handler| {
+            handler(ctx) catch |err| {
+                const error_response = switch (err) {
+                    //add whatever errors you need here ig
+                    else =>
+                    \\HTTP/1.1 500 Internal Server Error
                     \\Content-Type: text/html
+                    \\Content-Length: 37
                     \\
-                    \\<h1>404 Not Found</h1>
+                    \\<h1>500 Internal Server Error</h1>
                     \\
-                ;
-                try client_writer.writeAll(not_found_response);
-            }
-
-            client_writer.context.close();
-
-            self.job_queue.removeFront();
-
-            const end = timer.read();
-            const elapsedtime = @as(f64, @floatFromInt(end - strt)) / 1_000_000_000.0;
-
-            std.debug.print("Request took {d:.2}ms\n", .{elapsedtime});
+                };
+                client_writer.writeAll(error_response) catch {};
+                std.debug.print("Error in worker: {}\n", .{err});
+                job_ptr.deinit();
+                return;
+            };
+        } else {
+            const not_found_response =
+                \\HTTP/1.1 404 Not Found
+                \\Content-Type: text/html
+                \\
+                \\<h1>404 Not Found</h1>
+                \\
+            ;
+            try client_writer.writeAll(not_found_response);
         }
     }
 
