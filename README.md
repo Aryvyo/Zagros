@@ -6,6 +6,14 @@ A simple, fast server built in Zig!
 
 I started this project for fun, and have been working on it for the same reason since. If there are parts that just aren't good code, or you disagree with, feel free to let me know in an issue or contribute to fix it! I'm here to learn before everything else and I understand I'll make mistakes or do stuff the 'wrong' way :)
 
+## PATCH NOTES 0.2
+- Fixed queue overlapping removal bug
+- Added option to display time taken to fulfill request in config (`display_time`)
+- Added cli option to regenerate (This will overwrite the old one) default config (`./Zagros -c` or `./Zagros --config`)
+- Improved error handling in worker function (should cover most cases, open issue if the server still implodes after an error)
+- Temporarily removed the static file watcher server
+- Removed herobrine
+
 
 ## Installation
 
