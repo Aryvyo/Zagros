@@ -91,7 +91,7 @@ fn handleIndex(ctx: ThreadPool.RequestContext) !void {
         \\
     ;
 
-    const filledhtml = try std.fmt.allocPrint(ctx.allocator, html);
+    const filledhtml = try std.fmt.allocPrint(ctx.allocator, html, .{});
     const response = try std.fmt.allocPrint(ctx.allocator,
         \\HTTP/1.1 200 OK
         \\Content-Type: text/html
