@@ -69,7 +69,7 @@ The main functions you'll care about are:
   utils.parseFormData(allocator:std.mem.Allocator,body:[]const u8);
 ` 
 
-which returns a `StringHasmap([]const u8)`
+which returns a `StringHashmap([]const u8)`
 
 
 
