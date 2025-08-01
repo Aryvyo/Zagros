@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub fn parseCookies(allocator: std.mem.Allocator, cookie_header: []const u8) std.StringHashMap([]const u8) {
     var cookies = std.StringHashMap([]const u8).init(allocator);
-    var iter = std.mem.split(u8, cookie_header, ";");
+    var iter = std.mem.splitScalar(u8, cookie_header, ';');
 
     while (iter.next()) |cookie| {
         var cookie_trimmed = std.mem.trim(u8, cookie, " ");
@@ -25,7 +25,7 @@ pub fn getPath(path_raw: []const u8, allocator: std.mem.Allocator) !std.ArrayLis
     else
         path_raw;
 
-    var pathIter = std.mem.split(u8, path, "/");
+    var pathIter = std.mem.splitScalar(u8, path, '/');
     _ = pathIter.next();
 
     while (pathIter.next()) |component| {

@@ -98,7 +98,11 @@ pub fn main() !void {
     //defer watcher.join();
 
     while (true) {
-        const client = try server.accept();
-        try pool.submit(client);
+        var client = try server.accept();
+        pool.submit(&client) catch |err| {
+            //kind of an ugly handling, will go over this again when i overhaul logging
+            std.debug.print("Error occured in submitting to pool: {any}", .{err});
+            client.stream.close();
+        };
     }
 }

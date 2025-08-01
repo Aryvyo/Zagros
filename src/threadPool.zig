@@ -117,13 +117,13 @@ pub const JobQueue = struct {
         self.condition.signal();
     }
 
-    pub fn waitAndPop(self: *JobQueue) *Job {
+    pub fn waitAndPop(self: *JobQueue) Job {
         self.mutex.lock();
         defer self.mutex.unlock();
         while (self.jobs.items.len == 0) {
             self.condition.wait(&self.mutex);
         }
-        return @constCast(&self.jobs.orderedRemove(0));
+        return self.jobs.orderedRemove(0);
     }
 };
 
@@ -167,14 +167,14 @@ pub const ThreadPool = struct {
 
     fn workerFn(self: *ThreadPool) !void {
         while (!self.shutdown.load(.acquire)) {
-            const job_ptr = self.job_queue.waitAndPop();
+            var job_ptr = self.job_queue.waitAndPop();
             const jobAllocator = job_ptr.arena.allocator();
 
             defer {
                 job_ptr.deinit();
             }
 
-            self.processJob(jobAllocator, job_ptr) catch |err| {
+            self.processJob(jobAllocator, &job_ptr) catch |err| {
                 std.debug.print("job error:{}\n", .{err});
                 continue;
             };
@@ -192,7 +192,7 @@ pub const ThreadPool = struct {
         const client_writer = job_ptr.client.stream.writer();
 
         const first_line = (try client_reader.readUntilDelimiterOrEofAlloc(jobAllocator, '\n', 65536)) orelse return error.InvalidRequest;
-        var firstLineIter = std.mem.split(u8, first_line, " ");
+        var firstLineIter = std.mem.splitScalar(u8, first_line, ' ');
         const methodStr = firstLineIter.next() orelse return error.InvalidRequest;
         const pathRaw = firstLineIter.next() orelse return error.InvalidRequest;
 
@@ -282,8 +282,9 @@ pub const ThreadPool = struct {
         }
     }
 
-    pub fn submit(self: *ThreadPool, client: net.Server.Connection) !void {
-        const job = Job.init(client, self.allocator);
+    pub fn submit(self: *ThreadPool, client: *net.Server.Connection) !void {
+        const job = Job.init(client.*, self.allocator);
+        client.* = undefined;
         try self.job_queue.push(job);
     }
 };
